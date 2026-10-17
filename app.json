@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "plugins": [
+      [
+        "@react-native-tvos/config-tv",
+        {
+          "isTV": true,
+          "androidTVBanner": "./assets/images/icon-400x240.png"
+        }
+      ]
+    ],
+    "name": "TinyNest",
+    "slug": "tinynest",
+    "android": {
+      "package": "com.anonymous.tinynest"
+    }
+  }
+}

@@ -27,9 +27,11 @@ import DrawerItem from './DrawerItem';
 
 const menuItems = [
   {name: 'Home', icon: 'home', screen: 'Home'},
-  {name: 'Movies', icon: 'movie', screen: 'Movies'},
-  {name: 'TV Shows', icon: 'television', screen: 'TVShows'},
-  {name: 'Settings', icon: 'account-cog', screen: 'Settings'},
+  {name: 'Learn', icon: 'book-open-page-variant', screen: 'Learn'},
+  {name: 'Stories', icon: 'book-open-page-variant', screen: 'Stories'},
+  {name: 'Play', icon: 'puzzle-outline', screen: 'Play'},
+  {name: 'Move', icon: 'human-child', screen: 'Move'},
+  {name: 'Settings', icon: 'cog-outline', screen: 'Settings'},
 ];
 
 const COLLAPSED_WIDTH = 60;
@@ -112,7 +114,7 @@ export default DrawerContent;
 const styles = StyleSheet.create({
   drawer: {
     flex: 1,
-    backgroundColor: '#232F3E',
+    backgroundColor: '#172437',
     paddingTop: 50,
     position: 'absolute',
     left: 0,

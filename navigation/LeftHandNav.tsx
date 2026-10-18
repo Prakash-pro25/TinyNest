@@ -23,9 +23,11 @@ import {
 } from '@react-navigation/drawer';
 import {
   HomeScreen,
-  MoviesScreen,
+  LearnScreen,
+  MoveScreen,
+  PlayScreen,
   SettingsScreen,
-  TVShowsScreen,
+  StoriesScreen,
 } from '../screens';
 import DrawerContent from './DrawerContent';
 
@@ -47,8 +49,10 @@ const LeftHandNav = () => {
         headerShown: false,
       }}>
       <Drawer.Screen name="Home" component={HomeScreen} />
-      <Drawer.Screen name="Movies" component={MoviesScreen} />
-      <Drawer.Screen name="TVShows" component={TVShowsScreen} />
+      <Drawer.Screen name="Learn" component={LearnScreen} />
+      <Drawer.Screen name="Stories" component={StoriesScreen} />
+      <Drawer.Screen name="Play" component={PlayScreen} />
+      <Drawer.Screen name="Move" component={MoveScreen} />
       <Drawer.Screen name="Settings" component={SettingsScreen} />
     </Drawer.Navigator>
   );

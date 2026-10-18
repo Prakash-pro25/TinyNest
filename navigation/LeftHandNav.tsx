@@ -27,7 +27,9 @@ import {
   MoveScreen,
   PlayScreen,
   SettingsScreen,
+  SleepSceneScreen,
   StoriesScreen,
+  WindDownScreen,
 } from '../screens';
 import DrawerContent from './DrawerContent';
 
@@ -53,6 +55,8 @@ const LeftHandNav = () => {
       <Drawer.Screen name="Stories" component={StoriesScreen} />
       <Drawer.Screen name="Play" component={PlayScreen} />
       <Drawer.Screen name="Move" component={MoveScreen} />
+      <Drawer.Screen name="Wind-down" component={WindDownScreen} />
+      <Drawer.Screen name="Sleep Scene" component={SleepSceneScreen} />
       <Drawer.Screen name="Settings" component={SettingsScreen} />
     </Drawer.Navigator>
   );

@@ -1,52 +1,83 @@
-# TinyNest — Fire TV app
+# TinyNest — Fire TV MVP
 
-*A cozy TV companion that guides kids from play to study to sleep, without the screen-time fights.*
+A child-friendly routine companion for Amazon Fire TV / Fire OS, built on the supplied React Native TV starter. The existing React Navigation drawer and TV D-pad navigation have been preserved.
 
-This project begins from Amazon's `hello-world-fire-tv-react-native` sample. The existing React Native TV drawer and D-pad-aware drawer components are preserved as the working navigation layer. The `src/` tree is a planned feature architecture scaffold; it is not wired into the app yet. Keep using the current root-level `App.tsx`, `navigation/`, and `screens/` until each migration step is implemented and tested.
+## MVP features in this ZIP
 
-## MVP scope (TV first)
+- **Home:** TinyNest welcome screen and shortcuts to Learn, Stories, Play and Move.
+- **Learn & Study:** Word Garden / Number Trail / Focus Time choices and a working five-minute focus timer with pause/reset/completion state.
+- **Stories:** Three built-in offline stories with page-by-page reading.
+- **Play:** A simple four-card memory-match game with move count and replay.
+- **Move:** Animal moves, rainbow stretch and a guided breathing toggle.
+- **Wind-down:** 10-, 5- and 2-minute countdown presets; after the timer finishes, continue to the sleep scene.
+- **Sleep Scene:** Calm in-app night screen with a delayed dim state.
+- **Settings:** Demo parent preferences and child age band.
+- **TV navigation:** Permanent left drawer, large touch targets, focus styling and Select/Back flows.
 
-1. Home: show current mode, friendly mascot message, and the next activity.
-2. Learn / Study: parent-assigned tasks, focus timer, break reminder, small completion reward.
-3. Stories: curated or locally bundled stories, parent-approved themes, narration when available.
-4. Play: age-appropriate guided play activities.
-5. Move: simple movement and breathing activities that work with the remote.
-6. Wind-down: 10 / 5 / 2-minute transition reminders, then a calm activity.
-7. Sleep scene: dim, quiet scene and fade-out while TinyNest remains open.
-8. Parent controls (later milestone): pairing code, schedule, limits, bedtime, and a small progress summary.
+## Important scope notes
 
-## Important platform limitation
+This is a front-end hackathon MVP. Settings are held in React component state and reset when the app restarts. It does not yet include AsyncStorage persistence, parent-phone pairing, a backend, cloud sync, AI-generated stories, text-to-speech, or actual system-level TV power/screen control. A Fire TV app can only display its sleep scene while the app is open.
 
-TinyNest can only guide screen time while TinyNest itself is open. It cannot interrupt other apps such as Netflix or power off the TV. In the MVP, “sleep” is an in-app dim scene and fade to black.
+## Stack
 
-## Current working entry points
+- Expo SDK 51 baseline
+- React 18
+- `react-native-tvos` 0.74.x alias
+- React Navigation Drawer 6
+- React Native Paper icons
+- TypeScript
 
-- `App.tsx` — wraps the app in `NavigationContainer`.
-- `navigation/LeftHandNav.tsx` — permanent left drawer and route registration.
-- `navigation/DrawerContent.tsx` and `navigation/DrawerItem.tsx` — TV-oriented drawer/focus behavior.
-- `screens/` — existing starter screens; replace their content incrementally.
-- `app.json` — Expo TV plugin and TV banner configuration.
+Do not upgrade Expo / React Native versions until the current native build is verified.
 
-## Target feature architecture
+## Windows 11 setup
 
-See [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md) for the folder tree and migration map, [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the app design, and [`docs/WINDOWS_SETUP.md`](docs/WINDOWS_SETUP.md) for Windows 11 setup and run commands.
+Prerequisites: Node.js/npm, JDK 17, Android Studio with Android SDK/platform tools, and a configured Android TV emulator.
 
-## Run on Windows 11
+```powershell
+node -v
+npm -v
+java -version
+adb devices
+```
 
-Use the same package manager already used successfully in your local project. From PowerShell in this folder:
+Open PowerShell in this directory (the folder containing `package.json`):
 
 ```powershell
 npm install
-adb devices
 npm run android
 ```
 
-Start an Android TV emulator first, or connect a compatible device with USB debugging enabled. Detailed setup and troubleshooting: [`docs/WINDOWS_SETUP.md`](docs/WINDOWS_SETUP.md).
+For the first build, Gradle may need several minutes to download and compile dependencies. Ensure the Android TV emulator is already running and appears in `adb devices`.
 
-## Baseline compatibility
+For Metro-only development:
 
-This starter uses Expo `~51.0.13`, React `18.2.0`, `react-native-tvos` `~0.74.2-0`, React Navigation Drawer `6.x`, and Reanimated `3.10.1`. Keep this baseline stable while the current build is verified. Do not upgrade Expo / React Native / TV packages as part of a folder-only refactor.
+```powershell
+npm start
+```
 
-## Development rule
+If Metro cache causes a stale bundle:
 
-Make small, testable changes. After each navigation or focus change, run the app on the Android TV emulator and verify Up / Down / Left / Right / Select / Back with a remote or emulator controls.
+```powershell
+npx expo start --clear
+```
+
+## TV test checklist
+
+1. Home screen loads without red screen or invalid icon warnings.
+2. D-pad focus is visible on cards and drawer entries.
+3. Select opens the expected route/activity.
+4. Back returns to the previous story flow where applicable.
+5. Study timer can start, pause and reset.
+6. Story pages advance and finish back to the story list.
+7. Memory game can find both pairs and replay.
+8. Wind-down timer can be paused and reaches the sleep scene.
+9. Settings toggles respond to the remote.
+
+## Existing navigation files
+
+- `navigation/LeftHandNav.tsx` — route registration
+- `navigation/DrawerContent.tsx` — collapsible TV drawer and remote handling
+- `navigation/DrawerItem.tsx` — focusable drawer entries
+- `screens/` — current working screen implementation
+
+The planned `src/` folders are retained as an incremental migration scaffold. The active screens stay in `screens/` to minimize risk to the working starter.

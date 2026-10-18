@@ -28,9 +28,11 @@ import DrawerItem from './DrawerItem';
 const menuItems = [
   {name: 'Home', icon: 'home', screen: 'Home'},
   {name: 'Learn', icon: 'book-open-page-variant', screen: 'Learn'},
-  {name: 'Stories', icon: 'book-open-page-variant', screen: 'Stories'},
+  {name: 'Stories', icon: 'book-open-variant', screen: 'Stories'},
   {name: 'Play', icon: 'puzzle-outline', screen: 'Play'},
   {name: 'Move', icon: 'human-child', screen: 'Move'},
+  {name: 'Wind-down', icon: 'weather-night', screen: 'Wind-down'},
+  {name: 'Sleep Scene', icon: 'moon-waning-crescent', screen: 'Sleep Scene'},
   {name: 'Settings', icon: 'cog-outline', screen: 'Settings'},
 ];
 

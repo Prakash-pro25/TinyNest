@@ -1,0 +1,845 @@
+/*
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: MIT-0
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of this
+ * software and associated documentation files (the "Software"), to deal in the Software
+ * without restriction, including without limitation the rights to use, copy, modify,
+ * merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+ * PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {
+  AppState,
+  Animated,
+  BackHandler,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import {StatusBar} from 'expo-status-bar';
+import {WebView} from 'react-native-webview';
+
+type Mode =
+  | 'normal'
+  | 'lesson-setup'
+  | 'sleep-warning'
+  | 'sleep-locked'
+  | 'window-task'
+  | 'window-verify'
+  | 'lesson'
+  | 'lesson-complete'
+  | 'lesson-verify';
+
+// Demo-only PIN for local testing. Replace with a securely provisioned parent credential before release.
+const DEMO_PARENT_PIN = '2468';
+const LESSON_OPTIONS = [15, 20, 30];
+const TASKS = [
+  {
+    emoji: '💧',
+    title: 'Drink some water',
+    detail: 'Take a little break and drink a glass of water.',
+  },
+  {
+    emoji: '🧸',
+    title: 'Tidy your toys',
+    detail: 'Put a few toys back in their place.',
+  },
+  {
+    emoji: '🧍',
+    title: 'Stretch like a star',
+    detail: 'Stand up, stretch gently, and take a deep breath.',
+  },
+  {
+    emoji: '🪥',
+    title: 'Brush your teeth',
+    detail: 'Ask a grown-up if it is time to brush your teeth.',
+  },
+];
+
+const PLAYER_HTML = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><style>html,body,#player{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#02050b}body{font-family:Arial,sans-serif}</style></head><body><div id="player"></div><script>var player;function onYouTubeIframeAPIReady(){player=new YT.Player('player',{width:'100%',height:'100%',videoId:'M7lc1UVf-VE',playerVars:{autoplay:0,controls:1,playsinline:1,rel:0,modestbranding:1,fs:1,iv_load_policy:3},events:{onReady:function(){window.tinynestPlayerReady=true;}}});}window.tinynestPlayerControl=function(action){try{if(!player||!player.getPlayerState)return;if(action==='pause'){player.pauseVideo();}else if(action==='stop'){player.stopVideo();}else if(action==='play'){player.playVideo();}}catch(e){}};var tag=document.createElement('script');tag.src='https://www.youtube.com/iframe_api';document.head.appendChild(tag);</script></body></html>`;
+
+export default function App() {
+  const webRef = useRef<WebView>(null);
+  const fade = useRef(new Animated.Value(0)).current;
+  const [mode, setMode] = useState<Mode>('normal');
+  const [taskIndex, setTaskIndex] = useState(0);
+  const [lessonMinutes, setLessonMinutes] = useState(15);
+  const [deadline, setDeadline] = useState<number | null>(null);
+  const [remainingMs, setRemainingMs] = useState(15 * 60 * 1000);
+  const [verifyOrigin, setVerifyOrigin] = useState<
+    'sleep' | 'window' | 'lesson'
+  >('window');
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [wrongAttempts, setWrongAttempts] = useState(0);
+  const [lockedUntil, setLockedUntil] = useState<number | null>(null);
+  const [now, setNow] = useState(Date.now());
+
+  const playerCommand = useCallback((command: 'pause' | 'stop' | 'play') => {
+    // Calls the YouTube IFrame Player API inside the existing WebView; it does not launch the separate YouTube app.
+    webRef.current?.injectJavaScript(
+      `window.tinynestPlayerControl && window.tinynestPlayerControl('${command}'); true;`,
+    );
+  }, []);
+
+  const beginSleep = useCallback(() => {
+    playerCommand('pause');
+    setMode('sleep-warning');
+    fade.setValue(0);
+    Animated.timing(fade, {
+      toValue: 1,
+      duration: 650,
+      useNativeDriver: true,
+    }).start();
+  }, [fade, playerCommand]);
+
+  useEffect(() => {
+    if (mode !== 'sleep-warning') return undefined;
+    const timeout = setTimeout(() => {
+      playerCommand('stop');
+      setMode('sleep-locked');
+    }, 5200);
+    return () => clearTimeout(timeout);
+  }, [mode, playerCommand]);
+
+  const beginWindow = () => {
+    playerCommand('pause');
+    setTaskIndex(Math.floor(Math.random() * TASKS.length));
+    setMode('window-task');
+  };
+
+  const beginLesson = (minutes: number) => {
+    const endAt = Date.now() + minutes * 60 * 1000;
+    setLessonMinutes(minutes);
+    setDeadline(endAt);
+    setRemainingMs(minutes * 60 * 1000);
+    setMode('lesson');
+    playerCommand('play');
+  };
+
+  useEffect(() => {
+    if (mode !== 'lesson' || deadline === null) return undefined;
+    const tick = () => {
+      const remaining = Math.max(0, deadline - Date.now());
+      setRemainingMs(remaining);
+      if (remaining <= 0) {
+        playerCommand('pause');
+        setMode('lesson-complete');
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 500);
+    const appStateSub = AppState.addEventListener('change', state => {
+      if (state === 'active') tick();
+    });
+    return () => {
+      clearInterval(interval);
+      appStateSub.remove();
+    };
+  }, [deadline, mode, playerCommand]);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      // In restricted states, Back must never dismiss the parental overlay or resume video.
+      if (mode !== 'normal') {
+        if (mode === 'window-task' || mode === 'lesson') playerCommand('pause');
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [mode, playerCommand]);
+
+  const startVerification = () => {
+    setPin('');
+    setPinError('');
+    const origin = mode === 'lesson-complete' ? 'lesson' : 'window';
+    setVerifyOrigin(origin);
+    setMode(origin === 'lesson' ? 'lesson-verify' : 'window-verify');
+  };
+
+  const addDigit = (digit: string) => {
+    if (lockedUntil && now < lockedUntil) {
+      setPinError(
+        `Please wait ${Math.ceil((lockedUntil - now) / 1000)} seconds.`,
+      );
+      return;
+    }
+    setPinError('');
+    setPin(current => {
+      const next = (current + digit).slice(0, 4);
+      if (next.length === 4) {
+        if (next === DEMO_PARENT_PIN) {
+          setWrongAttempts(0);
+          setLockedUntil(null);
+          setPinError('');
+          setMode('normal');
+          setDeadline(null);
+          // Return to the same single player screen; the parent explicitly authorizes playback.
+          setTimeout(() => playerCommand('play'), 100);
+        } else {
+          const attempts = wrongAttempts + 1;
+          setWrongAttempts(attempts);
+          setPinError(
+            attempts >= 3
+              ? 'Too many attempts. Please wait 30 seconds.'
+              : 'That PIN did not match. Try again.',
+          );
+          if (attempts >= 3) setLockedUntil(Date.now() + 30000);
+          return '';
+        }
+      }
+      return next;
+    });
+  };
+
+  const resetPin = () => {
+    setPin('');
+    setPinError('');
+  };
+  const isRestricted = mode !== 'normal' && mode !== 'lesson';
+  const timerLabel = useMemo(() => {
+    const seconds = Math.ceil(remainingMs / 1000);
+    return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+  }, [remainingMs]);
+
+  const renderModeOverlay = () => {
+    if (mode === 'normal' || mode === 'lesson' || mode === 'lesson-setup')
+      return null;
+    if (mode === 'sleep-warning')
+      return (
+        <Animated.View
+          style={[styles.fullOverlay, styles.sleepOverlay, {opacity: fade}]}>
+          <Text style={styles.heroEmoji}>🌙</Text>
+          <Text style={styles.overlayTitle}>Time to sleep, little star!</Text>
+          <Text style={styles.overlayText}>
+            The moon is out. Let’s rest our eyes and get cozy. 😴
+          </Text>
+          <View style={styles.stars}>
+            <Text style={styles.star}>✦</Text>
+            <Text style={styles.star}>✧</Text>
+            <Text style={styles.star}>✦</Text>
+          </View>
+          <Text style={styles.smallHint}>TinyNest is gently winding down…</Text>
+        </Animated.View>
+      );
+    if (mode === 'sleep-locked')
+      return (
+        <View style={styles.blackLock}>
+          <Text style={styles.lockMoon}>🌙</Text>
+          <Text style={styles.lockedTitle}>Good night</Text>
+          <Text style={styles.lockedCopy}>
+            This screen is resting. Ask a parent to unlock TinyNest.
+          </Text>
+          <PrimaryButton
+            title="PARENT UNLOCK"
+            onPress={() => {
+              setPin('');
+              setPinError('');
+              setVerifyOrigin('sleep');
+              setMode('window-verify');
+            }}
+          />
+        </View>
+      );
+    if (mode === 'window-task') {
+      const task = TASKS[taskIndex];
+      return (
+        <View style={styles.fullOverlay}>
+          <View style={styles.glassCard}>
+            <Text style={styles.kicker}>TINY BREAK TIME</Text>
+            <Text style={styles.heroEmoji}>{task.emoji}</Text>
+            <Text style={styles.overlayTitle}>{task.title}</Text>
+            <Text style={styles.overlayText}>{task.detail}</Text>
+            <Text style={styles.helperText}>
+              When you’re finished, ask a parent to confirm.
+            </Text>
+            <PrimaryButton
+              title="I'M DONE — ASK A PARENT"
+              onPress={startVerification}
+            />
+          </View>
+        </View>
+      );
+    }
+    if (mode === 'lesson-complete')
+      return (
+        <View style={styles.fullOverlay}>
+          <View style={styles.glassCard}>
+            <Text style={styles.heroEmoji}>📚⭐</Text>
+            <Text style={styles.overlayTitle}>Great learning!</Text>
+            <Text style={styles.overlayText}>
+              Your {lessonMinutes}-minute lesson is complete.
+            </Text>
+            <Text style={styles.helperText}>
+              Ask a parent before starting another lesson.
+            </Text>
+            <PrimaryButton
+              title="PARENT VERIFICATION"
+              onPress={startVerification}
+            />
+          </View>
+        </View>
+      );
+    if (mode === 'window-verify' || mode === 'lesson-verify')
+      return (
+        <View style={styles.fullOverlay}>
+          <View style={styles.pinCard}>
+            <Text style={styles.kicker}>GROWN-UPS ONLY</Text>
+            <Text style={styles.overlayTitle}>Parent check</Text>
+            <Text style={styles.overlayText}>
+              Enter your 4-digit parent PIN to continue.
+            </Text>
+            <View style={styles.pinDots}>
+              {[0, 1, 2, 3].map(i => (
+                <View
+                  key={i}
+                  style={[styles.pinDot, pin.length > i && styles.pinDotFilled]}
+                />
+              ))}
+            </View>
+            <View style={styles.keypad}>
+              {[
+                '1',
+                '2',
+                '3',
+                '4',
+                '5',
+                '6',
+                '7',
+                '8',
+                '9',
+                'clear',
+                '0',
+                'back',
+              ].map(key => (
+                <Pressable
+                  key={key}
+                  hasTVPreferredFocus={key === '1'}
+                  focusable
+                  style={({focused}) => [
+                    styles.key,
+                    focused && styles.focusedKey,
+                  ]}
+                  onPress={() =>
+                    key === 'clear'
+                      ? resetPin()
+                      : key === 'back'
+                        ? setPin(value => value.slice(0, -1))
+                        : addDigit(key)
+                  }>
+                  <Text style={styles.keyText}>
+                    {key === 'clear' ? 'CLEAR' : key === 'back' ? '⌫' : key}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            {pinError ? (
+              <Text style={styles.pinError}>{pinError}</Text>
+            ) : (
+              <Text style={styles.helperText}>
+                Demo PIN: 2468 (replace before release)
+              </Text>
+            )}
+            <Pressable
+              onPress={() => {
+                setPin('');
+                setPinError('');
+                setMode(
+                  verifyOrigin === 'sleep'
+                    ? 'sleep-locked'
+                    : verifyOrigin === 'lesson'
+                      ? 'lesson-complete'
+                      : 'window-task',
+                );
+              }}
+              style={({focused}) => [
+                styles.cancelButton,
+                focused && styles.focusedKey,
+              ]}>
+              <Text style={styles.cancelText}>CANCEL</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    return null;
+  };
+
+  return (
+    <View style={styles.root}>
+      <StatusBar hidden />
+      <View style={styles.topbar}>
+        <View>
+          <Text style={styles.brand}>TinyNest</Text>
+          <Text style={styles.brandSub}>A LITTLE SPACE TO GROW</Text>
+        </View>
+        <View style={styles.statusPill}>
+          <View style={styles.statusDot} />
+          <Text style={styles.statusText}>
+            {mode === 'lesson'
+              ? 'LESSON IN PROGRESS'
+              : mode === 'normal'
+                ? 'PARENT-SUPERVISED'
+                : 'PROTECTED MODE'}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.playerWrap}>
+        <WebView
+          ref={webRef}
+          source={{html: PLAYER_HTML, baseUrl: 'https://www.youtube.com'}}
+          style={styles.webview}
+          javaScriptEnabled
+          domStorageEnabled
+          allowsFullscreenVideo
+          allowsInlineMediaPlayback
+          mediaPlaybackRequiresUserAction={false}
+          scrollEnabled={false}
+          bounces={false}
+          originWhitelist={['*']}
+          setSupportMultipleWindows={false}
+          onShouldStartLoadWithRequest={request =>
+            request.url.startsWith('https://www.youtube.com') ||
+            request.url.startsWith('https://www.google.com') ||
+            request.url === 'about:blank'
+          }
+        />
+        {mode === 'lesson' && (
+          <View pointerEvents="none" style={styles.lessonTimer}>
+            <Text style={styles.timerLabel}>LESSON TIME</Text>
+            <Text style={styles.timerValue}>{timerLabel}</Text>
+          </View>
+        )}
+        {isRestricted && <View style={StyleSheet.absoluteFillObject} />}
+        {renderModeOverlay()}
+      </View>
+      {mode === 'normal' && (
+        <View style={styles.controls}>
+          <ModeButton
+            emoji="🌙"
+            title="SLEEP MODE"
+            subtitle="Wind down"
+            tone="purple"
+            onPress={beginSleep}
+          />
+          <ModeButton
+            emoji="💧"
+            title="WINDOW MODE"
+            subtitle="Take a short break"
+            tone="teal"
+            onPress={beginWindow}
+          />
+          <ModeButton
+            emoji="📚"
+            title="LESSON MODE"
+            subtitle="Timed learning"
+            tone="blue"
+            onPress={() => {
+              playerCommand('pause');
+              setMode('lesson-setup');
+            }}
+          />
+        </View>
+      )}
+      {mode === 'lesson-setup' && (
+        <View style={styles.lessonBar}>
+          <Text style={styles.lessonBarTitle}>Choose lesson length</Text>
+          {LESSON_OPTIONS.map(minutes => (
+            <Pressable
+              key={minutes}
+              hasTVPreferredFocus={minutes === lessonMinutes}
+              onPress={() => beginLesson(minutes)}
+              style={({focused}) => [
+                styles.durationButton,
+                focused && styles.focusedKey,
+              ]}>
+              <Text style={styles.durationText}>{minutes} MIN</Text>
+            </Pressable>
+          ))}
+          <Pressable
+            onPress={() => {
+              playerCommand('pause');
+              setMode('normal');
+            }}
+            style={({focused}) => [
+              styles.stopLessonButton,
+              focused && styles.focusedKey,
+            ]}>
+            <Text style={styles.stopLessonText}>CANCEL</Text>
+          </Pressable>
+        </View>
+      )}
+      <Text style={styles.footer}>
+        Made for little learners · Use with a grown-up
+      </Text>
+    </View>
+  );
+}
+
+function PrimaryButton({title, onPress}: {title: string; onPress: () => void}) {
+  return (
+    <Pressable
+      hasTVPreferredFocus
+      onPress={onPress}
+      style={({focused}) => [
+        styles.primaryButton,
+        focused && styles.focusedPrimary,
+      ]}>
+      <Text style={styles.primaryText}>{title}</Text>
+    </Pressable>
+  );
+}
+function ModeButton({
+  emoji,
+  title,
+  subtitle,
+  tone,
+  onPress,
+}: {
+  emoji: string;
+  title: string;
+  subtitle: string;
+  tone: 'purple' | 'teal' | 'blue';
+  onPress: () => void;
+}) {
+  const toneStyle =
+    tone === 'purple'
+      ? styles.mode_purple
+      : tone === 'teal'
+        ? styles.mode_teal
+        : styles.mode_blue;
+  return (
+    <Pressable
+      hasTVPreferredFocus={tone === 'teal'}
+      onPress={onPress}
+      style={({focused}) => [
+        styles.modeButton,
+        toneStyle,
+        focused && styles.focusedMode,
+      ]}>
+      <Text style={styles.modeEmoji}>{emoji}</Text>
+      <View style={styles.modeCopy}>
+        <Text style={styles.modeTitle}>{title}</Text>
+        <Text style={styles.modeSubtitle}>{subtitle}</Text>
+      </View>
+      <Text style={styles.modeArrow}>›</Text>
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: '#080D18',
+    paddingHorizontal: 30,
+    paddingTop: 17,
+    paddingBottom: 10,
+  },
+  topbar: {
+    height: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  brand: {
+    color: '#F5F8FF',
+    fontSize: 28,
+    fontWeight: '900',
+    letterSpacing: -0.8,
+  },
+  brandSub: {
+    color: '#8394AD',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 2.4,
+    marginTop: 1,
+  },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    borderWidth: 1,
+    borderColor: '#29374D',
+    backgroundColor: '#111C2D',
+    borderRadius: 30,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  statusDot: {width: 7, height: 7, borderRadius: 4, backgroundColor: '#5EEAD4'},
+  statusText: {
+    color: '#C4D0E2',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.1,
+  },
+  playerWrap: {
+    flex: 1,
+    minHeight: 170,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#2D3B51',
+    backgroundColor: '#000',
+  },
+  webview: {flex: 1, backgroundColor: '#000'},
+  controls: {flexDirection: 'row', gap: 14, marginTop: 14, minHeight: 82},
+  modeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 17,
+    paddingHorizontal: 17,
+    paddingVertical: 13,
+  },
+  mode_purple: {backgroundColor: '#211D38', borderColor: '#554878'},
+  mode_teal: {backgroundColor: '#12312F', borderColor: '#2B7770'},
+  mode_blue: {backgroundColor: '#172945', borderColor: '#355D91'},
+  focusedMode: {
+    borderColor: '#FFFFFF',
+    borderWidth: 3,
+    transform: [{scale: 1.025}],
+  },
+  modeEmoji: {fontSize: 28},
+  modeCopy: {flex: 1},
+  modeTitle: {
+    color: '#F4F7FF',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+  modeSubtitle: {color: '#AAB9CF', fontSize: 11, marginTop: 5},
+  modeArrow: {color: '#E5EDFF', fontSize: 27, fontWeight: '300'},
+  footer: {
+    color: '#62728A',
+    fontSize: 9,
+    textAlign: 'center',
+    marginTop: 9,
+    letterSpacing: 0.7,
+  },
+  lessonTimer: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    backgroundColor: 'rgba(8,13,24,0.9)',
+    borderColor: '#4773A9',
+    borderWidth: 1,
+    borderRadius: 13,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  timerLabel: {
+    color: '#B8D7FF',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1.4,
+  },
+  timerValue: {
+    color: '#FFFFFF',
+    fontSize: 25,
+    fontWeight: '900',
+    fontVariant: ['tabular-nums'],
+  },
+  lessonBar: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 12,
+  },
+  lessonBarTitle: {
+    color: '#C4D0E2',
+    fontSize: 12,
+    fontWeight: '700',
+    marginRight: 6,
+  },
+  durationButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+    backgroundColor: '#162945',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#365B87',
+  },
+  durationText: {color: '#EAF3FF', fontSize: 12, fontWeight: '900'},
+  stopLessonButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: '#40232D',
+    borderWidth: 1,
+    borderColor: '#844151',
+  },
+  stopLessonText: {color: '#FFDCE3', fontSize: 11, fontWeight: '900'},
+  fullOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(7,12,24,0.97)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  sleepOverlay: {backgroundColor: '#090D21'},
+  heroEmoji: {fontSize: 70, marginBottom: 12},
+  overlayTitle: {
+    color: '#F5F7FF',
+    fontSize: 29,
+    fontWeight: '900',
+    textAlign: 'center',
+    letterSpacing: -0.5,
+  },
+  overlayText: {
+    color: '#C0CBE0',
+    fontSize: 16,
+    textAlign: 'center',
+    lineHeight: 24,
+    marginTop: 10,
+    maxWidth: 560,
+  },
+  smallHint: {
+    color: '#8796B5',
+    fontSize: 11,
+    letterSpacing: 1.2,
+    marginTop: 24,
+    fontWeight: '800',
+  },
+  stars: {flexDirection: 'row', gap: 36, marginTop: 20},
+  star: {color: '#B8A7FF', fontSize: 22},
+  glassCard: {
+    width: '80%',
+    maxWidth: 700,
+    alignItems: 'center',
+    paddingHorizontal: 34,
+    paddingVertical: 24,
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: '#3B526F',
+    backgroundColor: '#111D30',
+  },
+  kicker: {
+    color: '#75E5D5',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 2.2,
+    marginBottom: 14,
+  },
+  helperText: {
+    color: '#96A8C3',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 18,
+  },
+  primaryButton: {
+    marginTop: 22,
+    minHeight: 50,
+    minWidth: 230,
+    paddingHorizontal: 25,
+    paddingVertical: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#65E7D3',
+    borderRadius: 14,
+  },
+  primaryText: {
+    color: '#08211F',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  focusedPrimary: {
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
+    transform: [{scale: 1.03}],
+  },
+  blackLock: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
+  },
+  lockMoon: {fontSize: 52, marginBottom: 12},
+  lockedTitle: {color: '#F8FAFF', fontSize: 28, fontWeight: '900'},
+  lockedCopy: {
+    color: '#9AA7B8',
+    fontSize: 14,
+    textAlign: 'center',
+    maxWidth: 460,
+    marginTop: 9,
+  },
+  pinCard: {
+    width: '82%',
+    maxWidth: 560,
+    alignItems: 'center',
+    padding: 24,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#40536F',
+    backgroundColor: '#101A2B',
+  },
+  pinDots: {flexDirection: 'row', gap: 14, marginVertical: 18},
+  pinDot: {
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#7E91AD',
+  },
+  pinDotFilled: {backgroundColor: '#65E7D3', borderColor: '#65E7D3'},
+  keypad: {
+    width: 270,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  key: {
+    width: 78,
+    height: 45,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 11,
+    backgroundColor: '#1D2A40',
+    borderWidth: 1,
+    borderColor: '#344762',
+  },
+  focusedKey: {borderColor: '#FFFFFF', borderWidth: 3},
+  keyText: {color: '#F5F8FF', fontSize: 17, fontWeight: '800'},
+  pinError: {
+    color: '#FF9BA8',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 12,
+  },
+  cancelButton: {
+    marginTop: 15,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#344762',
+  },
+  cancelText: {
+    color: '#BCC9DA',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+});
